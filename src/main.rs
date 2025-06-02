@@ -123,6 +123,24 @@ fn average_regular(
     
 }
 
+fn average_covaraince(
+    vec: &Vec<Quat>,
+){
+
+    let dirs: Vec<Vec3> = vec.iter().map(|quat| *quat * Vec3::Y).collect();
+    let n = dirs.len();
+    if n > 0 {
+        let mut covariance = Mat3::ZERO;
+        for v in dirs {
+            covariance += Mat3::from_cols_slice(&v.to_array()) * Mat3::from_cols_slice(&v.to_array()).transpose();
+        }
+
+        
+    }
+
+    
+}
+
 fn debug_direction(
     mut gizmos: Gizmos,
     targets: Query<(&GlobalTransform), Or<(With<AverageIn>, With<AverageOut>)>>
