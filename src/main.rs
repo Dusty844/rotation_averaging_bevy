@@ -1,7 +1,9 @@
+use std::ops::Sub;
+
 use bevy::prelude::*;
 use turborand::prelude::*;
 use bevy_egui::EguiPlugin;
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use bevy_inspector_egui::{inspector_options::InspectorOptionsType, quick::WorldInspectorPlugin};
 
 mod cam;
 
@@ -51,9 +53,10 @@ fn setup(
         Name::new("out"),
         ));
 
-    
+    let mut i_f = 1.0;
     for i in 0..count {
         let dir = Vec3::new(rand.f32_normalized() * 5.0, rand.f32_normalized() * 5.0, rand.f32_normalized() * 5.0);
+        
         
         commands.spawn((
             Mesh3d(meshes.add(Cone::default())),
@@ -61,10 +64,11 @@ fn setup(
                 base_color: Color::srgb(0.8, 0.7, 0.7),
                 ..Default::default()
             })),
-            Transform::from_rotation(Quat::from_scaled_axis(dir)).with_translation(dir.normalize() * 4.0),
+            Transform::from_xyz(i_f, 0.0, 0.0),
             AverageIn::default(),
             Name::new("target"),
         ));
+        i_f += 1.0;
     }
     
     
@@ -95,7 +99,7 @@ pub enum AverageVariant{
 }
 
 fn set_targets(
-    mut targets: Query<(&mut AverageIn, &GlobalTransform), Or<(Added<AverageIn>, Added<GlobalTransform>, Changed<GlobalTransform>)>>,
+    mut targets: Query<(&mut AverageIn, &GlobalTransform)>,
     mut out: Single<(&mut Transform, &GlobalTransform, &AverageOut), Without<AverageIn>>
 ) {
     let mut rots = Vec::new();
@@ -104,9 +108,28 @@ fn set_targets(
         let dir = gt.rotation().to_scaled_axis();
         target.rotation = dir;
     }
-    out.0.rotation = average_regular(&rots).normalize();
+    out.0.rotation = average_euler(&rots);
     
 
+}
+
+fn average_euler(
+    vec: &Vec<Quat>,
+) -> Quat{
+    let mut average = Vec3::ZERO;
+    let mut d = 0.0;
+    for quat in vec {
+        let euler: Vec3 = quat.to_euler(EulerRot::XYZ).into();
+        average += euler;
+        d += 1.0;
+        println!("euler: {}", euler);
+    }
+    if average.length() > 0.001 {
+        average /= d;
+    }
+    println!("average: {}", average);
+    Quat::from_euler(EulerRot::XYZ,average.x, average.y, average.z).normalize()
+    // Quat::IDENTITY
 }
 
 fn average_regular(
@@ -115,11 +138,12 @@ fn average_regular(
     let mut average = Vec3::ZERO;
     let mut d = 0.0;
     for quat in vec{
-        average += quat.to_scaled_axis();
+        let euler = quat.to_euler(EulerRot::XYZ);
+        average += Vec3::new(euler.0, euler.1, euler.2);
         d += 1.0;
     }
-    //average /= d;
-    Quat::from_scaled_axis(average)
+    average /= d;
+    Quat::from_euler(EulerRot::XYZ,average.x, average.y, average.z).normalize()
     
 }
 
