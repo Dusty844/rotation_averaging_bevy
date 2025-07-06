@@ -1,4 +1,4 @@
-use std::ops::Sub;
+use std::ops::{Deref, Sub};
 
 use bevy::prelude::*;
 use turborand::prelude::*;
@@ -16,6 +16,7 @@ fn main() {
         .add_plugins(WorldInspectorPlugin::new())
         .add_systems(Startup, setup)
         .add_systems(Update, (set_targets, debug_direction))
+        .insert_resource(AverageVariantResource::default())
         .register_type::<(AverageIn, AverageOut, AverageVariant, AverageVariantResource)>()
         .run();
 }
@@ -27,7 +28,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let rand = Rng::new();
-    let count = 3;
+    let count = 2;
     commands.spawn((
         PointLight {
             shadows_enabled: true,
@@ -48,10 +49,38 @@ fn setup(
             base_color: Color::srgb(0.5, 0.75, 0.7),
             ..Default::default()
         })),
+        Transform::from_xyz(-2.0, 0.0, 0.0),
+        AverageOut{
+            variant: AverageVariant::Regular,
+        },
+        Name::new("out regular"),
+    ));
+
+    commands.spawn((
+        Mesh3d(meshes.add(Cone::default())),
+        MeshMaterial3d(materials.add(StandardMaterial{
+            base_color: Color::srgb(0.2, 0.9, 0.25),
+            ..Default::default()
+        })),
+        Transform::from_xyz(-1.0, 0.0, 0.0),
+        AverageOut{
+            variant: AverageVariant::Euler,
+        },
+        Name::new("out euler"),
+    ));
+    
+    commands.spawn((
+        Mesh3d(meshes.add(Cone::default())),
+        MeshMaterial3d(materials.add(StandardMaterial{
+            base_color: Color::srgb(0.9, 0.25, 0.25),
+            ..Default::default()
+        })),
         Transform::default(),
-        AverageOut,
-        Name::new("out"),
-        ));
+        AverageOut{
+            variant: AverageVariant::Covariance(5),
+        },
+        Name::new("out covariance"),
+    ));
 
     let mut i_f = 1.0;
     for i in 0..count {
@@ -61,8 +90,7 @@ fn setup(
         commands.spawn((
             Mesh3d(meshes.add(Cone::default())),
             MeshMaterial3d(materials.add(StandardMaterial{
-                base_color: Color::srgb(0.8, 0.7, 0.7),
-                ..Default::default()
+                base_color: Color::srgb(0.8, 0.7, 0.7),                ..Default::default()
             })),
             Transform::from_xyz(i_f, 0.0, 0.0),
             AverageIn::default(),
@@ -82,7 +110,9 @@ pub struct AverageIn{
 
 #[derive(Component, Copy, Clone, Default, Reflect)]
 #[reflect(Component)]
-pub struct AverageOut;
+pub struct AverageOut{
+    variant: AverageVariant,
+}
 
 #[derive(Resource, Copy, Clone, Reflect, Default)]
 #[reflect(Resource)]
@@ -94,13 +124,14 @@ pub struct AverageVariantResource{
 pub enum AverageVariant{
     #[default]
     Regular,
-    Eigen,
+    Euler,
+    Covariance(usize),
     
 }
 
 fn set_targets(
     mut targets: Query<(&mut AverageIn, &GlobalTransform)>,
-    mut out: Single<(&mut Transform, &GlobalTransform, &AverageOut), Without<AverageIn>>
+    mut out: Query<(&mut Transform, &AverageOut), Without<AverageIn>>
 ) {
     let mut rots = Vec::new();
     for (mut target, gt) in targets.iter_mut() {
@@ -108,7 +139,20 @@ fn set_targets(
         let dir = gt.rotation().to_scaled_axis();
         target.rotation = dir;
     }
-    out.0.rotation = average_euler(&rots);
+    for (mut t, ao) in out.iter_mut(){
+        match ao.variant{
+            AverageVariant::Regular => {
+                t.rotation = average_regular(&rots);
+            }
+            AverageVariant::Euler => {
+                t.rotation = average_euler(&rots);
+            }
+            AverageVariant::Covariance(x) => {
+                t.rotation = average_covaraince(&rots, x);
+            }
+        }
+    }
+    
     
 
 }
@@ -122,12 +166,10 @@ fn average_euler(
         let euler: Vec3 = quat.to_euler(EulerRot::XYZ).into();
         average += euler;
         d += 1.0;
-        println!("euler: {}", euler);
     }
     if average.length() > 0.001 {
         average /= d;
     }
-    println!("average: {}", average);
     Quat::from_euler(EulerRot::XYZ,average.x, average.y, average.z).normalize()
     // Quat::IDENTITY
 }
@@ -138,30 +180,49 @@ fn average_regular(
     let mut average = Vec3::ZERO;
     let mut d = 0.0;
     for quat in vec{
-        let euler = quat.to_euler(EulerRot::XYZ);
-        average += Vec3::new(euler.0, euler.1, euler.2);
+        
+        average += quat.to_scaled_axis();
         d += 1.0;
     }
     average /= d;
-    Quat::from_euler(EulerRot::XYZ,average.x, average.y, average.z).normalize()
+    Quat::from_scaled_axis(average).normalize()
     
 }
 
+// based off of the following paper: https://users.cecs.anu.edu.au/~hartley/Papers/PDF/Hartley-Trumpf:Rotation-averaging:IJCV.pdf
+// did my best to copy what is there.
 fn average_covaraince(
     vec: &Vec<Quat>,
-){
-
-    let dirs: Vec<Vec3> = vec.iter().map(|quat| *quat * Vec3::Y).collect();
-    let n = dirs.len();
-    if n > 0 {
-        let mut covariance = Mat3::ZERO;
-        for v in dirs {
-            covariance += Mat3::from_cols_slice(&v.to_array()) * Mat3::from_cols_slice(&v.to_array()).transpose();
+    x: usize,
+) -> Quat{
+    let mut a = [[0.0; 4]; 4];
+    for quat in vec {
+        for i in 0..4 {
+            for j in 0..4 {
+                a[i][j] += quat.to_array()[i] * quat.to_array()[j];
+            }
         }
-
-        
     }
 
+    let mut eigenvec = Quat::from_array([0.5; 4]);
+    eigenvec = eigenvec.normalize();
+
+    for _ in 0..x {
+        let mut av = [0.0; 4];
+        for i in 0..4{
+            for j in 0..4{
+                av[i] += a[i][j] * eigenvec.to_array()[j]
+            }
+        }
+        eigenvec = Quat::from_array(av).normalize();
+        
+    }
+    if eigenvec.to_array()[0] < 0.0 {
+        let mut temp = eigenvec.to_array();
+        temp.iter_mut().for_each(|x| *x *= -1.0);
+        eigenvec = Quat::from_array(temp);
+    }
+    eigenvec
     
 }
 
