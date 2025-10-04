@@ -12,12 +12,11 @@ use cam::*;
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, CameraControllerPlugin))
-        .add_plugins(EguiPlugin { enable_multipass_for_primary_context: true })
+        .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
         .add_systems(Startup, setup)
         .add_systems(Update, (set_targets, debug_direction))
         .insert_resource(AverageVariantResource::default())
-        .register_type::<(AverageIn, AverageOut, AverageVariant, AverageVariantResource)>()
         .run();
 }
 
@@ -79,8 +78,22 @@ fn setup(
         AverageOut{
             variant: AverageVariant::Covariance(5),
         },
-        Name::new("out covariance"),
+        Name::new("out covariance 1"),
     ));
+
+    commands.spawn((
+        Mesh3d(meshes.add(Cone::default())),
+        MeshMaterial3d(materials.add(StandardMaterial{
+            base_color: Color::srgb(0.9, 0.8, 0.6),
+            ..Default::default()
+        })),
+        Transform::from_xyz(-3.0, 0.0, 0.0),
+        AverageOut{
+            variant: AverageVariant::Covariance2(5),
+        },
+        Name::new("out covariance 2"),
+    ));
+    
 
     let mut i_f = 1.0;
     for i in 0..count {
@@ -126,6 +139,7 @@ pub enum AverageVariant{
     Regular,
     Euler,
     Covariance(usize),
+    Covariance2(usize)
     
 }
 
@@ -149,6 +163,9 @@ fn set_targets(
             }
             AverageVariant::Covariance(x) => {
                 t.rotation = average_covaraince(&rots, x);
+            }
+            AverageVariant::Covariance2(x) => {
+                t.rotation = accurate_quat_average(&rots, x, Quat::IDENTITY)
             }
         }
     }
@@ -226,6 +243,7 @@ fn average_covaraince(
     
 }
 
+
 fn debug_direction(
     mut gizmos: Gizmos,
     targets: Query<(&GlobalTransform), Or<(With<AverageIn>, With<AverageOut>)>>
@@ -237,3 +255,63 @@ fn debug_direction(
     }
     
 }
+
+
+pub fn accurate_quat_average(
+    quats: &Vec<Quat>,
+    quality_count: usize,
+    start_quat: Quat,
+)-> Quat {
+    let mut accum = Mat4::ZERO;
+
+    for (i, q) in quats.iter().enumerate() {
+        // assumes that quats are xyzw instead of wxyz.. i hope
+        accum += mat4(
+            vec4(q.w * q.w, q.w * q.x, q.w * q.y, q.w * q.z),
+            vec4(q.x * q.w, q.x * q.x, q.x * q.y, q.x * q.z),
+            vec4(q.y * q.w, q.y * q.x, q.y * q.y, q.y * q.z),
+            vec4(q.z * q.w, q.z * q.x, q.z * q.y, q.z * q.z),
+            
+        );  
+    }
+    let u = svd_dominant_eigen(accum, start_quat.into(), quality_count, 0.0001);
+    let v = (accum * u).normalize();
+
+    quat_abs(Quat::from_xyzw(v.w, v.x, v.y, v.z))
+}
+
+fn svd_dominant_eigen(
+    a: Mat4,
+    v0: Vec4,
+    iterations: usize,
+    epsilon: f32,
+) -> Vec4{
+    let mut v = v0;
+    let mut ev = ((a * v) / v).x;
+
+    for i in 0..iterations {
+
+        
+        let av = a * v;
+
+        let v_new = av.normalize();
+        let ev_new = ((a * v_new) / v_new).x;
+
+        if f32::abs(ev - ev_new) < epsilon{
+            break;
+        }
+        v = v_new;
+        ev = ev_new;
+    }
+
+    v
+}
+
+
+fn quat_abs(a: Quat) -> Quat {
+        if a.w.is_sign_negative() {
+            -a
+        }else {
+            a
+        }
+    }

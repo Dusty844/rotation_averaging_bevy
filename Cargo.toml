@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.16", features = ["wayland"] }
-bevy-inspector-egui = "0.31.0"
-bevy_egui = "0.34.1"
+bevy = { version = "0.17.1", features = ["wayland"] }
+bevy-inspector-egui = "0.34.0"
+bevy_egui = "0.37.0"
 # Set max log levels. This helps avoid unwanted low-severity log spam, which can affect performance.
 log = { version = "0.4", features = [
     "max_level_debug",

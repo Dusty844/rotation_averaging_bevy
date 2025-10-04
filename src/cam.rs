@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use std::f32::consts::PI;
 use bevy::input::mouse::AccumulatedMouseMotion;
-use bevy::window::CursorGrabMode;
+use bevy::window::{CursorGrabMode, CursorOptions};
 
 pub struct CameraControllerPlugin;
 
@@ -31,7 +31,8 @@ impl Default for CameraController {
 
 fn cam_controller(
     mut camera_q: Query<(&mut Transform, &CameraController), With<Camera>>,
-    mut window: Single<&mut Window>,
+    mut cursor: Single<&mut CursorOptions>,
+    window: Single<&Window>,
     key: Res<ButtonInput<KeyCode>>,
     mouse_movement: Res<AccumulatedMouseMotion>,
     time: Res<Time<Virtual>>,
@@ -39,7 +40,7 @@ fn cam_controller(
 
     let delta = time.delta_secs();
 
-    let cursor_lock = window.cursor_options.grab_mode == CursorGrabMode::Locked;
+    let cursor_lock = cursor.grab_mode == CursorGrabMode::Locked;
 
     let (mut cam_transform, cam_controller) = camera_q.single_mut().unwrap();
 
@@ -110,12 +111,12 @@ fn cam_controller(
     cam_transform.translation += direction * speed * delta;
 
     if key.just_pressed(KeyCode::KeyZ) {
-        if window.cursor_options.visible{
-            window.cursor_options.visible = false;
-            window.cursor_options.grab_mode = CursorGrabMode::Locked
+        if cursor.visible{
+            cursor.visible = false;
+            cursor.grab_mode = CursorGrabMode::Locked
         }else{
-            window.cursor_options.visible = true;
-            window.cursor_options.grab_mode = CursorGrabMode::None
+            cursor.visible = true;
+            cursor.grab_mode = CursorGrabMode::None
         }
     }
 }
